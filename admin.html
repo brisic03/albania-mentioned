@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Albania mentioned: admin</title>
+<style>
+  :root{
+    --bg:#fff7ef;--panel:#fff;--ink:#2b1a1f;--muted:#7d6a6f;--red:#e4283c;--line:rgba(43,26,31,.14);
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:ui-rounded,"SF Pro Rounded","Avenir Next Rounded","Avenir Next","Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:1.05rem;line-height:1.6}
+  :focus-visible{outline:2px solid var(--red);outline-offset:3px}
+  .wrap{max-width:52rem;margin:0 auto;padding:1.5rem}
+  h1{font-size:1.8rem;letter-spacing:-.02em}
+  h2{font-size:1.25rem;margin:2rem 0 .5rem}
+  .top{display:flex;justify-content:space-between;align-items:center;gap:1rem}
+  .btn{font:inherit;font-weight:700;cursor:pointer;border:0;border-radius:99px;padding:.55rem 1.1rem;background:var(--red);color:#fff}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.dark{background:var(--ink)}
+  .btn:disabled{opacity:.5;cursor:default}
+  label{display:block;font-weight:700;font-size:.95rem;margin-top:.9rem}
+  input{width:100%;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.55rem .75rem;margin-top:.25rem}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:1.25rem 1.4rem;margin-top:1rem}
+  .login{max-width:24rem;margin:3rem auto}
+  .msg{margin-top:.8rem;font-weight:700}
+  .msg.err{color:#b3121f}
+  .meta{color:var(--muted);font-size:.95rem}
+  .kind{color:var(--red);font-weight:800}
+  .entry h3{font-size:1.25rem;line-height:1.2;margin-top:.15rem}
+  .line{margin-top:.6rem;font-family:var(--serif);font-style:italic;white-space:pre-line}
+  .entry img{display:block;max-width:20rem;width:100%;border-radius:12px;margin-top:.7rem;border:1px solid var(--line)}
+  .entry a{word-break:break-all}
+  .acts{display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap}
+  .empty{color:var(--muted);margin-top:.5rem}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <section id="login" class="login card" hidden>
+    <h1>Admin sign in</h1>
+    <p class="meta">Only you can approve or remove mentions.</p>
+    <form id="lform">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required>
+      <label for="pw">Password</label>
+      <input id="pw" type="password" autocomplete="current-password" required>
+      <p class="msg" id="lmsg" role="status"></p>
+      <div class="acts"><button class="btn" type="submit">Sign in</button></div>
+    </form>
+  </section>
+
+  <section id="panel" hidden>
+    <div class="top">
+      <h1>Mentions</h1>
+      <div><a href="index.html" class="meta">View site</a> <button class="btn ghost" id="out">Sign out</button></div>
+    </div>
+    <p class="msg" id="pmsg" role="status"></p>
+    <h2>Waiting for approval</h2>
+    <div id="pending"></div>
+    <h2>Live on the site</h2>
+    <div id="live"></div>
+  </section>
+</div>
+
+<script src="config.js"></script>
+<script>
+  const CFG=window.SITE_CONFIG||{};
+  const BASE=(CFG.SUPABASE_URL||'').replace(/\/$/,'');
+  const $=id=>document.getElementById(id);
+  let token=sessionStorage.getItem('am-admin-token')||'';
+
+  const H=(extra={})=>({apikey:CFG.SUPABASE_KEY,Authorization:'Bearer '+token,...extra});
+  const safeUrl=u=>(u&&/^https?:\/\//i.test(u))?u:'';
+
+  function show(){
+    $('login').hidden=!!token;
+    $('panel').hidden=!token;
+    if(token)load();
+  }
+  function logout(msg){
+    token='';sessionStorage.removeItem('am-admin-token');
+    $('lmsg').textContent=msg||'';$('lmsg').classList.toggle('err',!!msg);
+    show();
+  }
+
+  $('lform').addEventListener('submit',async ev=>{
+    ev.preventDefault();
+    $('lmsg').textContent='Signing in...';$('lmsg').classList.remove('err');
+    try{
+      const r=await fetch(BASE+'/auth/v1/token?grant_type=password',{
+        method:'POST',headers:{apikey:CFG.SUPABASE_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify({email:$('email').value.trim(),password:$('pw').value})
+      });
+      const j=await r.json();
+      if(!r.ok||!j.access_token)throw new Error();
+      token=j.access_token;sessionStorage.setItem('am-admin-token',token);
+      $('pw').value='';$('lmsg').textContent='';
+      show();
+    }catch(e){$('lmsg').textContent='That email or password did not work.';$('lmsg').classList.add('err')}
+  });
+  $('out').addEventListener('click',()=>logout());
+
+  async function load(){
+    $('pmsg').textContent='';
+    try{
+      const r=await fetch(BASE+'/rest/v1/mentions?order=created_at.desc&select=*',{headers:H()});
+      if(r.status===401||r.status===403){logout('Your session ended. Sign in again.');return}
+      if(!r.ok)throw new Error();
+      const rows=await r.json();
+      draw($('pending'),rows.filter(x=>!x.approved),false);
+      draw($('live'),rows.filter(x=>x.approved),true);
+    }catch(e){$('pmsg').textContent='Could not load mentions. Refresh to try again.';$('pmsg').classList.add('err')}
+  }
+
+  function draw(box,rows,live){
+    box.innerHTML='';
+    if(!rows.length){const p=document.createElement('p');p.className='empty';p.textContent=live?'Nothing is live yet.':'Nothing is waiting. You are all caught up.';box.appendChild(p);return}
+    rows.forEach(x=>{
+      const c=document.createElement('article');c.className='card entry';
+      const m=document.createElement('div');m.className='meta';
+      const k=document.createElement('span');k.className='kind';k.textContent=x.kind;
+      m.append(k,document.createTextNode((x.release_year?' · '+x.release_year:'')+' · sent '+new Date(x.created_at).toLocaleString()));
+      const h=document.createElement('h3');h.textContent=x.title;
+      c.append(m,h);
+      if(x.who){const w=document.createElement('div');w.className='meta';w.textContent=x.who;c.appendChild(w)}
+      const l=document.createElement('p');l.className='line';l.textContent=x.line;c.appendChild(l);
+      const link=safeUrl(x.link);
+      if(link){const p=document.createElement('p');p.className='meta';const a=document.createElement('a');a.href=link;a.target='_blank';a.rel='noopener noreferrer';a.textContent=link;p.append('Link: ',a);if(x.video_time)p.append(' at '+x.video_time);c.appendChild(p)}
+      const shot=safeUrl(x.shot_url);
+      if(shot){const im=document.createElement('img');im.src=shot;im.alt='Submitted screenshot';im.loading='lazy';c.appendChild(im)}
+      const acts=document.createElement('div');acts.className='acts';
+      const main=document.createElement('button');main.className=live?'btn ghost':'btn';main.textContent=live?'Take off the site':'Approve';
+      main.addEventListener('click',()=>setApproved(x.id,!live,main));
+      const del=document.createElement('button');del.className='btn dark';del.textContent='Delete';
+      del.addEventListener('click',()=>remove(x,del));
+      acts.append(main,del);c.appendChild(acts);
+      box.appendChild(c);
+    });
+  }
+
+  async function setApproved(id,val,btn){
+    btn.disabled=true;
+    const r=await fetch(BASE+'/rest/v1/mentions?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:H({'Content-Type':'application/json',Prefer:'return=minimal'}),body:JSON.stringify({approved:val})});
+    if(r.status===401||r.status===403){logout('Your session ended. Sign in again.');return}
+    if(!r.ok){btn.disabled=false;$('pmsg').textContent='That did not save. Try again.';$('pmsg').classList.add('err');return}
+    $('pmsg').classList.remove('err');$('pmsg').textContent=val?'Approved. It is now live.':'Taken off the site.';
+    load();
+  }
+
+  async function remove(x,btn){
+    if(!confirm('Delete "'+x.title+'" for good?'))return;
+    btn.disabled=true;
+    const r=await fetch(BASE+'/rest/v1/mentions?id=eq.'+encodeURIComponent(x.id),{method:'DELETE',headers:H({Prefer:'return=minimal'})});
+    if(r.status===401||r.status===403){logout('Your session ended. Sign in again.');return}
+    if(!r.ok){btn.disabled=false;$('pmsg').textContent='That did not delete. Try again.';$('pmsg').classList.add('err');return}
+    // Remove the screenshot file too, if there is one (best effort).
+    const m=(x.shot_url||'').match(/\/object\/public\/screenshots\/([\w.-]+)$/);
+    if(m)fetch(BASE+'/storage/v1/object/screenshots/'+m[1],{method:'DELETE',headers:H()}).catch(()=>{});
+    $('pmsg').classList.remove('err');$('pmsg').textContent='Deleted.';
+    load();
+  }
+
+  show();
+</script>
+</body>
+</html>

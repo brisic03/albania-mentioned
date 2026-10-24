@@ -92,6 +92,9 @@
   .row{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
   .formactions{display:flex;gap:.75rem;justify-content:flex-end;margin-top:1.4rem}
 
+  .status{margin-top:1rem;font-weight:700}
+  .status.err{color:#b3121f}
+  .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
   footer{color:var(--muted);font-size:.9rem;padding:3rem 0 2.5rem;border-top:1px solid var(--line);margin-top:1rem}
 
   @media (max-width:560px){
@@ -141,13 +144,14 @@
   <div class="count" id="count"></div>
   <ul class="list" id="list"></ul>
 
-  <footer>Entries are saved in this browser for now. Sharing them with other visitors needs a backend, which we can add next.</footer>
+  <footer>New mentions are checked before they appear. Thank you for adding yours.</footer>
 </div>
 
 <dialog id="dlg">
   <form id="form" method="dialog">
     <h2>Add a mention</h2>
-    <p class="hint">Say where Albania comes up, so the next person can find it.</p>
+    <p class="hint">Say where Albania comes up, so the next person can find it. New mentions appear after a quick check.</p>
+    <div class="hp" aria-hidden="true"><label>Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label></div>
     <label for="f-title">Title</label>
     <input id="f-title" name="title" required placeholder="Film, song or interview name">
     <div class="row">
@@ -171,51 +175,60 @@
       <div id="g-time"><label for="f-time">Timestamp</label>
         <input id="f-time" name="time" placeholder="e.g. 1:12:30"></div>
     </div>
+    <p class="status" id="msg" role="status"></p>
     <div class="formactions">
       <button type="button" class="btn ghost" id="cancel">Cancel</button>
-      <button type="submit" class="btn">Add mention</button>
+      <button type="submit" class="btn" id="send">Send mention</button>
     </div>
   </form>
 </dialog>
 
+<script src="config.js"></script>
 <script>
-  const KEY='albania-mentioned-v1';
-  // Examples to show the layout. Delete or replace them with verified entries.
-  const seeds=[
-    {id:'s1',example:true,title:'Wag the Dog',kind:'Film',year:'1997',who:'Political fixers in the story',line:'A fictional war with Albania is invented to distract from a presidential scandal.',link:'',time:''},
-    {id:'s2',example:true,title:'Taken',kind:'Film',year:'2008',who:'The villains',line:'Albanian criminals are the antagonists, a portrayal many Albanians find stereotyped.',link:'',time:''},
-    {id:'s4',example:true,title:'A song that name-drops Albania',kind:'Song',year:'',who:'Replace with the artist',line:'Paste only the lyric lines that mention Albania.\nOne line per row, like this.',link:'',time:''},
-    {id:'s3',example:true,title:'An interview with an Albanian-heritage artist',kind:'Interview',year:'',who:'Replace with the real person',line:'Add the exact words they use when talking about Albania.',link:'',time:''}
-  ];
-  let mine=[];
-  try{mine=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){}
-  let kind='all',query='';
-
+  const CFG=window.SITE_CONFIG||{};
+  const configured=!!(CFG.SUPABASE_URL&&CFG.SUPABASE_KEY&&!/YOUR-/.test(CFG.SUPABASE_URL+CFG.SUPABASE_KEY));
+  const BASE=(CFG.SUPABASE_URL||'').replace(/\/$/,'');
+  const hdr=(extra={})=>{
+    const h={apikey:CFG.SUPABASE_KEY,...extra};
+    if((CFG.SUPABASE_KEY||'').startsWith('eyJ'))h.Authorization='Bearer '+CFG.SUPABASE_KEY;
+    return h;
+  };
   const $=id=>document.getElementById(id);
-  let hidden=[];
-  try{hidden=JSON.parse(localStorage.getItem(KEY+'-hidden')||'[]')}catch(e){}
-  const all=()=>[...mine,...seeds.filter(s=>!hidden.includes(s.id))];
+  const safeUrl=u=>(u&&/^https?:\/\//i.test(u))?u:'';
+
+  let rows=[],kind='all',query='',status='Loading mentions...';
+
+  async function load(){
+    if(!configured){status='This site is not connected to its database yet.';render();return}
+    try{
+      const r=await fetch(BASE+'/rest/v1/mentions?approved=eq.true&order=created_at.desc&select=*',{headers:hdr()});
+      if(!r.ok)throw new Error(r.status);
+      const data=await r.json();
+      rows=data.map(d=>({id:d.id,title:d.title,kind:d.kind,year:d.release_year||'',who:d.who||'',line:d.line,link:safeUrl(d.link),time:d.video_time||'',shot:safeUrl(d.shot_url)}));
+      status='';
+    }catch(e){status='Could not load the mentions. Refresh the page to try again.'}
+    render();
+  }
 
   function render(){
     const list=$('list');list.innerHTML='';
+    if(status){$('count').textContent=status;return}
     const q=query.toLowerCase();
-    const rows=all().filter(e=>(kind==='all'||e.kind===kind)&&(!q||[e.title,e.who,e.line].join(' ').toLowerCase().includes(q)));
-    $('count').textContent=rows.length+(rows.length===1?' mention':' mentions');
-    if(!rows.length){
+    const shown=rows.filter(e=>(kind==='all'||e.kind===kind)&&(!q||[e.title,e.who,e.line].join(' ').toLowerCase().includes(q)));
+    $('count').textContent=shown.length+(shown.length===1?' mention':' mentions');
+    if(!shown.length){
       const li=document.createElement('li');li.className='empty';
-      li.textContent='Nothing here yet. Add the first mention for this filter.';
+      li.textContent=rows.length?'No mentions match. Try another filter or search.':'No mentions yet. Be the first to add one.';
       list.appendChild(li);return;
     }
-    rows.forEach(e=>{
+    shown.forEach(e=>{
       const li=document.createElement('li');li.className='item';
       const side=document.createElement('div');side.className='side';
       const k=document.createElement('div');k.className='kind';k.textContent=e.kind;
-      const y=document.createElement('div');y.className='year';y.textContent=e.year||'';
+      const y=document.createElement('div');y.className='year';y.textContent=e.year;
       side.append(k,y);
       const body=document.createElement('div');
-      const h=document.createElement('h2');h.textContent=e.title;
-      if(e.example){const t=document.createElement('span');t.className='example';t.textContent='Example';h.appendChild(t)}
-      body.appendChild(h);
+      const h=document.createElement('h2');h.textContent=e.title;body.appendChild(h);
       if(e.who){const w=document.createElement('div');w.className='said';w.textContent=e.who;body.appendChild(w)}
       const l=document.createElement('p');l.className='line'+(e.kind==='Song'?' lyrics':'');l.textContent=e.line;body.appendChild(l);
       const yt=ytId(e.link);
@@ -237,22 +250,11 @@
         const x=document.createElement('a');x.href=e.link;x.target='_blank';x.rel='noopener noreferrer';
         x.textContent=yt?'Open on YouTube':(e.kind==='Song'?'Listen':'Watch');a.appendChild(x);
       }else if(e.time){const s=document.createElement('span');s.className='said';s.textContent='At '+e.time;a.appendChild(s)}
-      {
-        const d=document.createElement('button');d.className='linkbtn';d.textContent='Remove';
-        d.addEventListener('click',()=>{
-          if(e.example){hidden.push(e.id);localStorage.setItem(KEY+'-hidden',JSON.stringify(hidden))}
-          else{mine=mine.filter(m=>m.id!==e.id);save()}
-          render();
-        });a.appendChild(d);
-      }
       if(a.children.length)body.appendChild(a);
       li.append(side,body);list.appendChild(li);
     });
   }
-  const save=()=>{
-    try{localStorage.setItem(KEY,JSON.stringify(mine));return true}
-    catch(e){alert('This browser has no space left for more images. Remove an entry with a screenshot, or add this one without a screenshot.');return false}
-  };
+
   function ytId(u){
     if(!u)return null;
     const m=u.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([\w-]{11})/);
@@ -264,25 +266,28 @@
     if(p.some(isNaN))return 0;
     return p.reduce((a,n)=>a*60+n,0);
   }
-  // Shrink screenshots so they fit in browser storage.
+  // Shrink screenshots to a small JPEG before uploading.
   function shrink(file){
     return new Promise((res,rej)=>{
-      const r=new FileReader();
-      r.onerror=rej;
-      r.onload=()=>{
-        const img=new Image();
-        img.onerror=rej;
-        img.onload=()=>{
-          const s=Math.min(1,900/img.width);
-          const c=document.createElement('canvas');
-          c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
-          c.getContext('2d').drawImage(img,0,0,c.width,c.height);
-          res(c.toDataURL('image/jpeg',.8));
-        };
-        img.src=r.result;
+      const url=URL.createObjectURL(file);
+      const img=new Image();
+      img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('bad image'))};
+      img.onload=()=>{
+        const s=Math.min(1,1000/img.width);
+        const c=document.createElement('canvas');
+        c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
+        c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(b=>b?res(b):rej(new Error('bad image')),'image/jpeg',.8);
       };
-      r.readAsDataURL(file);
+      img.src=url;
     });
+  }
+  async function upload(blob){
+    const name=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2))+'.jpg';
+    const r=await fetch(BASE+'/storage/v1/object/screenshots/'+name,{method:'POST',headers:hdr({'Content-Type':'image/jpeg'}),body:blob});
+    if(!r.ok)throw new Error('upload failed');
+    return BASE+'/storage/v1/object/public/screenshots/'+name;
   }
 
   $('tabs').addEventListener('click',ev=>{
@@ -294,8 +299,10 @@
   $('q').addEventListener('input',e=>{query=e.target.value.trim();render()});
 
   const dlg=$('dlg'),form=$('form');
-  $('open').addEventListener('click',()=>dlg.showModal());
+  const setMsg=(t,err)=>{$('msg').textContent=t;$('msg').classList.toggle('err',!!err)};
+  $('open').addEventListener('click',()=>{setMsg('');dlg.showModal()});
   $('cancel').addEventListener('click',()=>dlg.close());
+
   // Show the fields that fit each type.
   function adapt(){
     const k=$('f-kind').value;
@@ -310,18 +317,32 @@
 
   form.addEventListener('submit',async ev=>{
     ev.preventDefault();
+    if(!configured){setMsg('This site is not connected to its database yet.',true);return}
     const d=Object.fromEntries(new FormData(form));
-    let shot='';
-    const file=$('f-shot').files[0];
-    if(file&&!$('g-shot').hidden){
-      try{shot=await shrink(file)}catch(e){alert('That file could not be read as an image. Try a PNG or JPG.');return}
-    }
-    const entry={id:'u'+Date.now(),title:d.title.trim(),kind:d.kind,year:d.year.trim(),who:d.who.trim(),line:d.line.trim(),link:d.link.trim(),time:$('g-time').hidden?'':d.time.trim(),shot};
-    mine.unshift(entry);
-    if(!save()){mine.shift();return}
-    form.reset();adapt();dlg.close();kind='all';
-    document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-pressed',t.dataset.k==='all'));
-    render();
+    if(d.website){setMsg('Thank you! Your mention will appear after it has been checked.');return} // spam trap
+    const link=d.link.trim();
+    if(link&&!/^https?:\/\//i.test(link)){setMsg('Links must start with http:// or https://',true);return}
+    if(Date.now()-(+localStorage.getItem('am-last')||0)<30000){setMsg('Please wait half a minute before sending another.',true);return}
+    const btn=$('send');btn.disabled=true;setMsg('Sending...');
+    try{
+      let shotUrl=null;
+      const file=$('f-shot').files[0];
+      if(file&&!$('g-shot').hidden)shotUrl=await upload(await shrink(file));
+      const body={
+        title:d.title.trim(),kind:d.kind,
+        release_year:d.year.trim()||null,who:d.who.trim()||null,line:d.line.trim(),
+        link:link||null,video_time:$('g-time').hidden?null:(d.time.trim()||null),
+        shot_url:shotUrl,approved:false
+      };
+      const r=await fetch(BASE+'/rest/v1/mentions',{method:'POST',headers:hdr({'Content-Type':'application/json',Prefer:'return=minimal'}),body:JSON.stringify(body)});
+      if(!r.ok)throw new Error('save failed');
+      localStorage.setItem('am-last',Date.now());
+      form.reset();adapt();
+      setMsg('Thank you! Your mention will appear after it has been checked.');
+      setTimeout(()=>{if(dlg.open)dlg.close()},2500);
+    }catch(err){
+      setMsg('The mention was not sent. Check the details and the link, then try again.',true);
+    }finally{btn.disabled=false}
   });
 
   // Hero subtitle: cycles through lines, stops for reduced motion.
@@ -331,7 +352,7 @@
   if(!matchMedia('(prefers-reduced-motion: reduce)').matches){
     setInterval(()=>{sub.classList.add('out');setTimeout(()=>{i=(i+1)%lines.length;st.textContent=lines[i];sub.classList.remove('out')},400)},4200);
   }
-  render();
+  load();
 </script>
 </body>
 </html>
