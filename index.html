@@ -31,9 +31,9 @@
 
   /* hero: a cinema frame with a subtitle */
   .frame{
-    margin-top:1rem;aspect-ratio:21/9;min-height:15rem;border-radius:28px;position:relative;overflow:hidden;
+    margin-top:1rem;aspect-ratio:16/9;min-height:15rem;border-radius:28px;position:relative;overflow:hidden;
     background:
-      url("hero.jpg") center 55%/cover no-repeat,
+      url("hero.jpg") center 100%/cover no-repeat,
       #a8101f;
     border:1px solid var(--line);
     display:flex;flex-direction:column;justify-content:space-between;padding:1.5rem;
@@ -42,7 +42,7 @@
     font-weight:800;letter-spacing:-.03em;line-height:.95;
     font-size:clamp(2.6rem,9vw,6.5rem);
   }
-  .sub{align-self:center;text-align:center;max-width:36ch;min-height:3.4em}
+  .sub{align-self:flex-end;text-align:right;max-width:36ch;min-height:3.4em}
   .sub span{
     display:inline;background:#fff;color:#2b1a1f;border-radius:8px;
     font-size:clamp(1rem,2.2vw,1.35rem);line-height:1.7;padding:.15rem .5rem;
